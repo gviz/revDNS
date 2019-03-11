@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/boltdb/bolt"
-	"github.com/gviz/revDNS/intenal/wl"
+	"github.com/gviz/revDNS/internal/wl"
 )
 
 const (
