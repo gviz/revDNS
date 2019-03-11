@@ -1,0 +1,29 @@
+api:
+  port: 9090
+
+input:
+    type: "kafka"
+
+    # kafka broker host:port, default: "localhost:9092"
+    host: "localhost:9092"
+    topic: "bro-raw"
+    # kafka topics for dns and ssl data 
+    stream_dns:  "dns"
+    stream_ssl:  "ssl"
+    stream_http: "http"
+#Not implemented       
+Processing:
+  - Lists:
+    - Alexa: 
+      enabled: True
+      file: "./alexadb"
+    - Blacklist:
+      enabled: True
+      file: "./blacklist"
+
+  - Attacks:
+    Suricata: True
+    SimilarityCheck: True
+  - Augmentation:
+    Whois: True
+    
