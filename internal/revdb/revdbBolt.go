@@ -12,7 +12,8 @@ import (
 
 const (
 	boltdbVersion = "1.0.0"
-	bucketName    = "dnsBucket"
+	DnsBucket     = "dnsBucket"
+	IpBucket      = "ipBucket"
 )
 
 /*BoltDB Handler for boltdb backend*/
@@ -21,7 +22,6 @@ type BoltDB struct {
 	path       string
 	version    string
 	db         *bolt.DB
-	bucket     *bolt.Bucket
 	wl         *wl.WhitelistDB
 	numEntries int
 	sslEntries int
@@ -51,64 +51,49 @@ func (b *BoltDB) IncDNSEntries(numEntries int) {
 }
 
 //ReadDB reads ip information from boltdb
-func (b *BoltDB) ReadDB(ip string) (DnsVal, error) {
-	var domains DnsVal
+func (b *BoltDB) ReadDB(key string, bucket string) ([]byte, error) {
+	var val []byte
 	err := b.db.View(func(tx *bolt.Tx) error {
-		val := NewDnsVal()
-		v := tx.Bucket([]byte(bucketName)).Get([]byte(ip))
+		v := tx.Bucket([]byte(IpBucket)).Get([]byte(key))
 		if v != nil {
-			err := json.Unmarshal(v, &val)
-			if err != nil {
-				log.Println("Error decoding json val:", err)
-				return err
-			}
-			fmt.Println(val)
-			domains = *val
+			val = v
 		}
 		return nil
 	})
 
-	return domains, err
+	return val, err
 }
 
 //WriteDB writes ip/domain information to boltdb
-func (b *BoltDB) WriteDB(ip string, domains []string) (int, error) {
-	newEntry := true
-	err := b.db.Update(func(tx *bolt.Tx) error {
-		val := NewDnsVal()
-		v := tx.Bucket([]byte(bucketName)).Get([]byte(ip))
-		if v != nil {
-			/*Update */
-			err := json.Unmarshal(v, &val)
-			if err != nil {
-				log.Println("Error decoding json val:", err)
-				return err
-			}
-			newEntry = false
-		}
+func (b *BoltDB) WriteDB(key string, info interface{}) error {
+	var data []byte
+	var err error
+	var bucketName string
 
-		for _, name := range domains {
-			id := b.wl.Lookup(name)
-			//log.Printf("Doman: %s , WL: %d\n",
-			//name, id)
+	switch info.(type) {
+	case IPDBEntry:
+		bucketName = IpBucket
+		data, err = json.Marshal(info.(IPDBEntry))
+	case DnsInfo:
+		bucketName = DnsBucket
+		data, err = json.Marshal(info.(DnsInfo))
+	}
 
-			val.Domains[name] = DnsInfo{
-				WlId: id,
-			}
-		}
+	if err != nil {
+		log.Println("Error encoding json", err)
+		//debug.PrintStack()
+		return err
+	}
+	fmt.Println(string(data))
 
-		data, err := json.Marshal(&val)
-		if err != nil {
-			log.Println("Error encoding json")
-			return err
-		}
-		err = tx.Bucket([]byte(bucketName)).Put([]byte(ip), data)
-		if newEntry {
-			b.numEntries++
-		}
+	err = b.db.Update(func(tx *bolt.Tx) error {
+		err := tx.Bucket([]byte(bucketName)).Put([]byte(key), data)
 		return err
 	})
-	return 0, err
+	if err != nil {
+		log.Println("Error write:", err)
+	}
+	return err
 }
 
 //Close closes boltdb
@@ -139,23 +124,26 @@ func NewBoltDB(path string, file string, name string) *BoltDB {
 		} else {
 			b.Put([]byte("version"), []byte(boltdbVersion))
 		}
-		b, err = tx.CreateBucketIfNotExists([]byte(bucketName))
+		b, err = tx.CreateBucketIfNotExists([]byte(IpBucket))
 		if err != nil {
 			return fmt.Errorf("create bucket failed: %s", err)
 		}
 		bkt = b
+		b, err = tx.CreateBucketIfNotExists([]byte(DnsBucket))
+		if err != nil {
+			return fmt.Errorf("create bucket failed: %s", err)
+		}
 		return nil
 	})
 	w := wl.WhitelistDB{
 		Name: "Umbrella",
 	}
-	w.Init("asdfasdf")
+	w.Init("Default")
 	return &BoltDB{
-		name:   name,
-		path:   path,
-		db:     db,
-		bucket: bkt,
-		wl:     &w,
+		name: name,
+		path: path,
+		db:   db,
+		wl:   &w,
 	}
 }
 

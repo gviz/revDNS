@@ -11,6 +11,9 @@ input:
     stream_dns:  "dns"
     stream_ssl:  "ssl"
     stream_http: "http"
+    stream_flow: "flow"
+output:
+  alert-channel: "revDnsAlerts" #kafka topic for alerts
 #Not implemented       
 Processing:
   - Lists:

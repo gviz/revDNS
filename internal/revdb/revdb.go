@@ -1,23 +1,74 @@
 package revdb
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/gviz/revDNS/internal/wl"
 )
 
+type Alert struct {
+	name  string
+	atype string
+	msg   string
+}
+
 type DnsInfo struct {
-	WlId  int    `json:wlid`
-	Whois string `json:whois`
+	WlId     int                 `json:wlid`
+	Whois    string              `json:whois`
+	Referers map[string]struct{} //Http Referers
+	Source   map[string]struct{} //Source stream. Http, dns, ssl,...
+}
+
+type Proto struct {
+	Id    int
+	Dport int
 }
 
 type IpInfo struct {
 	Black    bool `json:black`
 	Attacker bool `json:attacker`
+	Protos   map[Proto]struct{}
 }
+
 type DnsVal struct {
 	IpInfo
 	Domains map[string]DnsInfo
+}
+
+type IPDBEntry struct {
+	Ip      IpInfo
+	Domains map[string]struct{}
+}
+
+func (dns IPDBEntry) MarshalJSON() ([]byte, error) {
+
+	pArray := make([]Proto, 0)
+
+	for k := range dns.Ip.Protos {
+		pArray = append(pArray, k)
+	}
+	//fmt.Println("Marshall called...")
+	return json.Marshal(
+		struct {
+			ip struct {
+				Black    bool
+				Attacker bool
+				Protos   []Proto
+			}
+			Domains map[string]struct{}
+		}{
+			ip: struct {
+				Black    bool
+				Attacker bool
+				Protos   []Proto
+			}{
+				Black:    dns.Ip.Black,
+				Attacker: dns.Ip.Attacker,
+				Protos:   pArray,
+			},
+			Domains: dns.Domains,
+		})
 }
 
 type dbConfig struct {
@@ -26,12 +77,12 @@ type dbConfig struct {
 
 //DBWriter Writer interface for revdb
 type DBWriter interface {
-	WriteDB(ip string, domains []string) (int, error)
+	WriteDB(key string, info interface{}) error
 }
 
 //DBReader Reader interface for revdb
 type DBReader interface {
-	ReadDB(ip string) (DnsVal, error)
+	ReadDB(key string, bucket string) ([]byte, error)
 }
 
 //DBIface Interface for revdb operations

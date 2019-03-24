@@ -12,27 +12,39 @@ type lkup struct {
 }
 
 type lkupReq struct {
-	ip string
-	w  http.ResponseWriter
-	c  chan struct{}
+	rType   string
+	lkupVal string
+	verbose int
+	w       http.ResponseWriter
+	c       chan struct{}
 }
 
 func (l *lkup) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var rType string
+	var lkupVal string
 	vars := mux.Vars(r)
 	ret := make(chan struct{})
 	if vars == nil {
 		return
 	}
 	log.Println(r)
-	ip, ok := vars["ip"]
+	lkupVal, ok := vars["ip"]
 	if ok == false {
-		return
+		lkupVal, ok = vars["hname"]
+		if ok == false {
+			return
+		}
+		rType = "DNS"
+	} else {
+		rType = "IP"
 	}
 
 	l.c <- lkupReq{
-		ip: ip,
-		w:  w,
-		c:  ret,
+		rType:   rType,
+		lkupVal: lkupVal,
+		verbose: 0,
+		w:       w,
+		c:       ret,
 	}
 	<-ret
 }

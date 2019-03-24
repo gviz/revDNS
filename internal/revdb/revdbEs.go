@@ -180,7 +180,17 @@ func ImportBroDNSEntries(writer DBIface) int {
 							revdb.db[ip.(string)] = dnsObj{name: make(map[string]struct{})}
 						}
 						revdb.db[ip.(string)].name[host] = struct{}{}
-						writer.WriteDB(ip.(string), []string{query})
+						writer.WriteDB(ip.(string),
+							DnsVal{
+								Domains: map[string]DnsInfo{
+									query: DnsInfo{
+										Source: map[string]struct{}{
+											"ES-DNS": struct{}{},
+										},
+									},
+								},
+							})
+
 						count++
 					}
 				} else {
@@ -241,7 +251,17 @@ func ImportBroSSLEntries(writer DBIface) int {
 				ts := getVal(broSSL.(map[string]interface{}), "ts")
 				logStr := fmt.Sprintf("%s %s %s ", ts, host, ip)
 				log.Print(logStr)
-				writer.WriteDB(ip, []string{host})
+				writer.WriteDB(ip,
+					DnsVal{
+						Domains: map[string]DnsInfo{
+							host: DnsInfo{
+								Source: map[string]struct{}{
+									"ES-SSL": struct{}{},
+								},
+							},
+						},
+					})
+
 				count++
 			}
 		}

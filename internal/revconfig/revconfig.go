@@ -7,11 +7,13 @@ import (
 )
 
 type KafkaConfig struct {
-	Host       string `yaml: host`
-	Topic      string
-	SslStream  string
-	DnsStream  string
-	HttpStream string
+	Host         string `yaml: host`
+	Topic        string
+	AlertChannel string
+	SslStream    string
+	DnsStream    string
+	HttpStream   string
+	FlowStream   string
 }
 type RevAPI struct {
 	Port int
@@ -52,11 +54,13 @@ func InitConfig() *RevConfig {
 			Port: viper.GetInt("api.port"),
 		},
 		Kafka: KafkaConfig{
-			Host:       viper.GetString("input.host"),
-			Topic:      viper.GetString("input.topic"),
-			SslStream:  viper.GetString("input.stream_ssl"),
-			DnsStream:  viper.GetString("input.stream_dns"),
-			HttpStream: viper.GetString("input.stream_http"),
+			Host:         viper.GetString("input.host"),
+			Topic:        viper.GetString("input.topic"),
+			AlertChannel: viper.GetString("output.alert-channel"),
+			SslStream:    viper.GetString("input.stream_ssl"),
+			DnsStream:    viper.GetString("input.stream_dns"),
+			HttpStream:   viper.GetString("input.stream_http"),
+			FlowStream:   viper.GetString("input.stream_flow"),
 		},
 		Checks: ProcessingConfig{
 			Alexa:         viper.GetBool("Processing.Lists.Alexa.enabled"),

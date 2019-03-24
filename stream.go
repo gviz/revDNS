@@ -5,6 +5,7 @@ import (
 
 	"github.com/Shopify/sarama"
 	"github.com/gviz/revDNS/internal/revconfig"
+	"github.com/gviz/revDNS/internal/revdb"
 )
 
 //Input Stream Handling .
@@ -15,6 +16,33 @@ type stream struct {
 	pConsumer sarama.PartitionConsumer
 	writer    chan writeReq
 	conf      *revconfig.RevConfig
+}
+
+func (s *stream) getNewWriteReq(kv map[string]string) writeReq {
+	var info revdb.DnsInfo
+
+	for k := range kv {
+		switch k {
+		case "dnsinfo.source":
+			info.Source = map[string]struct{}{
+				kv[k]: struct{}{},
+			}
+		case "dnsinfo.referer":
+			info.Referers = map[string]struct{}{
+				kv[k]: struct{}{},
+			}
+
+		}
+	}
+
+	return writeReq{
+		key: kv["ip"],
+		info: revdb.DnsVal{
+			Domains: map[string]revdb.DnsInfo{
+				kv["domain"]: info,
+			},
+		},
+	}
 }
 
 func (s *stream) Init(conf *revconfig.RevConfig) {
@@ -55,11 +83,27 @@ func (s *stream) processDNS(js *revJson) {
 	}
 
 	for indx := range answers {
-		//fmt.Println(string(answers[indx]))
-		s.writer <- writeReq{
-			ip:      answers[indx],
-			domains: []string{query},
+		kv := map[string]string{
+			"ip":             answers[indx],
+			"domain":         query,
+			"dnsinfo.source": "DNS",
 		}
+		s.writer <- s.getNewWriteReq(kv)
+		//fmt.Println(string(answers[indx]))
+		/*
+			s.writer <- writeReq{
+				ip:      answers[indx],
+				DnsVal: DnsVal{
+					Domains:{
+						query: DnsInfo{
+							Source: map[string]struct{}{
+								"DNS": struct{}{},
+							},
+						},
+					},
+				},
+			}
+		*/
 	}
 }
 
@@ -75,10 +119,25 @@ func (s *stream) processSSL(js *revJson) {
 		return
 	}
 
-	s.writer <- writeReq{
-		ip:      host,
-		domains: []string{server},
+	kv := map[string]string{
+		"ip":             host,
+		"domain":         server,
+		"dnsinfo.source": "SSL",
 	}
+
+	s.writer <- s.getNewWriteReq(kv)
+	/*
+		s.writer <- writeReq{
+			ip:      host,
+			DnsVal: DnsVal{
+				Domains:{
+					server: DnsInfo{
+						Source: "SSL"
+					}
+				},
+			},
+		}
+	*/
 }
 
 //Extract Host Fields
@@ -93,10 +152,25 @@ func (s *stream) processHTTP(js *revJson) {
 		return
 	}
 
-	s.writer <- writeReq{
-		ip:      host,
-		domains: []string{server},
+	kv := map[string]string{
+		"ip":             host,
+		"domain":         server,
+		"dnsinfo.source": "HTTP",
 	}
+
+	s.writer <- s.getNewWriteReq(kv)
+	/*
+		s.writer <- writeReq{
+			ip:      host,
+			DnsVal: DnsVal{
+				Domains:{
+					server: DnsInfo{
+						Source: "http"
+					}
+				},
+			},
+		}
+	*/
 }
 
 func (s *stream) Run() {
@@ -123,6 +197,10 @@ func (s *stream) Run() {
 					s.processSSL(js)
 				case s.conf.Kafka.HttpStream:
 					s.processHTTP(js)
+					/*
+						case s.conf.Kafka.FlowStream:
+							s.processFlow(js)
+					*/
 				default:
 					return
 				}
