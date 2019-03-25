@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/gviz/revDNS/internal/wl"
+	whoisparser "github.com/likexian/whois-parser-go"
 )
 
 type Alert struct {
@@ -14,10 +15,10 @@ type Alert struct {
 }
 
 type DnsInfo struct {
-	WlId     int                 `json:wlid`
-	Whois    string              `json:whois`
-	Referers map[string]struct{} //Http Referers
-	Source   map[string]struct{} //Source stream. Http, dns, ssl,...
+	WlId     int                    `json:wlid`
+	Whois    *whoisparser.WhoisInfo `json:"whois,omitempty"`
+	Referers map[string]struct{}    `json:"referers,omitempty"` //Http Referers
+	Source   map[string]struct{}    `json:"source,omitempty"`   //Source stream. Http, dns, ssl,...
 }
 
 type Proto struct {
@@ -26,9 +27,9 @@ type Proto struct {
 }
 
 type IpInfo struct {
-	Black    bool `json:black`
-	Attacker bool `json:attacker`
-	Protos   map[Proto]struct{}
+	Black    bool               `json:black`
+	Attacker bool               `json:attacker`
+	Protos   map[Proto]struct{} `json:"Protos,omitempty"`
 }
 
 type DnsVal struct {

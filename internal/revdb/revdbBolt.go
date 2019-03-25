@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 
 	"github.com/boltdb/bolt"
-	"github.com/gviz/revDNS/internal/wl"
 )
 
 const (
@@ -22,7 +22,7 @@ type BoltDB struct {
 	path       string
 	version    string
 	db         *bolt.DB
-	wl         *wl.WhitelistDB
+	lock       *sync.RWMutex
 	numEntries int
 	sslEntries int
 	dnsEntries int
@@ -33,7 +33,7 @@ type boltValue struct {
 }
 
 func (b *BoltDB) initConfig(cfg dbConfig) {
-	b.wl = cfg.wl
+	log.Println("BoltDB Init..")
 }
 
 func (b *BoltDB) String() string {
@@ -53,13 +53,15 @@ func (b *BoltDB) IncDNSEntries(numEntries int) {
 //ReadDB reads ip information from boltdb
 func (b *BoltDB) ReadDB(key string, bucket string) ([]byte, error) {
 	var val []byte
+	b.lock.RLock()
 	err := b.db.View(func(tx *bolt.Tx) error {
-		v := tx.Bucket([]byte(IpBucket)).Get([]byte(key))
+		v := tx.Bucket([]byte(bucket)).Get([]byte(key))
 		if v != nil {
 			val = v
 		}
 		return nil
 	})
+	b.lock.RUnlock()
 
 	return val, err
 }
@@ -84,12 +86,14 @@ func (b *BoltDB) WriteDB(key string, info interface{}) error {
 		//debug.PrintStack()
 		return err
 	}
-	fmt.Println(string(data))
+	fmt.Println("Adding ", string(data), "for ", key, " in ", bucketName)
 
+	b.lock.Lock()
 	err = b.db.Update(func(tx *bolt.Tx) error {
 		err := tx.Bucket([]byte(bucketName)).Put([]byte(key), data)
 		return err
 	})
+	b.lock.Unlock()
 	if err != nil {
 		log.Println("Error write:", err)
 	}
@@ -135,15 +139,12 @@ func NewBoltDB(path string, file string, name string) *BoltDB {
 		}
 		return nil
 	})
-	w := wl.WhitelistDB{
-		Name: "Umbrella",
-	}
-	w.Init("Default")
+
 	return &BoltDB{
 		name: name,
 		path: path,
 		db:   db,
-		wl:   &w,
+		lock: &sync.RWMutex{},
 	}
 }
 

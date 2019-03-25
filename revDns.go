@@ -6,10 +6,14 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
+	wis "github.com/domainr/whois"
 	"github.com/gorilla/mux"
 	"github.com/gviz/revDNS/internal/revconfig"
 	"github.com/gviz/revDNS/internal/revdb"
+	"github.com/gviz/revDNS/internal/wl"
+	whoisParser "github.com/likexian/whois-parser-go"
 )
 
 type writeReq struct {
@@ -23,18 +27,25 @@ type revDns struct {
 	writer  chan writeReq
 	db      revdb.DBIface
 	conf    *revconfig.RevConfig
+	wl      *wl.WhitelistDB
 }
 
 func NewRevDns(conf *revconfig.RevConfig) *revDns {
+	w := wl.WhitelistDB{
+		Name: "Umbrella",
+	}
+	w.Init("Default")
 	return &revDns{
 		httpReq: make(chan lkupReq, 50000),
 		writer:  make(chan writeReq, 50000),
 		conf:    conf,
+		wl:      &w,
 	}
 }
 
 func (r *revDns) updateIPEntry(ip string, new revdb.DnsVal) {
 	var old revdb.IPDBEntry
+	doUpdate := false
 	/*TBD: check for existing entry and update */
 	ipVal, err := r.db.ReadDB(ip, revdb.IpBucket)
 	if err == nil && len(ipVal) != 0 {
@@ -54,39 +65,73 @@ func (r *revDns) updateIPEntry(ip string, new revdb.DnsVal) {
 		}
 	}
 
-	if new.Attacker {
+	if new.Attacker && !old.Ip.Attacker {
+		doUpdate = true
 		old.Ip.Attacker = new.Attacker
 	}
 
-	if new.Black {
+	if new.Black && !old.Ip.Black {
+		doUpdate = true
 		old.Ip.Black = new.Black
 	}
 
 	for proto := range new.Protos {
 		if _, ok := old.Ip.Protos[proto]; !ok {
+			doUpdate = true
 			old.Ip.Protos[proto] = struct{}{}
 		}
 	}
 
 	for dm := range new.Domains {
 		if _, ok := old.Domains[dm]; !ok {
+			doUpdate = true
 			old.Domains[dm] = struct{}{}
 		}
 	}
-	r.db.WriteDB(ip, old)
+	if doUpdate {
+		r.db.WriteDB(ip, old)
+	}
+}
+
+func (r *revDns) updateWhoisInfo(name string, odm *revdb.DnsInfo) {
+	var dm string
+	log.Println("Updating whois...")
+
+	topDm := strings.Split(name, ".")
+	if len(topDm) > 2 {
+		dm = strings.Join(topDm[len(topDm)-2:], ".")
+		log.Println("Extracted topdm ", name, ":", dm)
+	} else {
+		dm = name
+	}
+
+	whoisInfo, er := wis.Fetch(dm)
+	if er == nil {
+		w, er := whoisParser.Parse(string(whoisInfo.Body))
+		if er != nil {
+			log.Println(er)
+		}
+		odm.Whois = &w
+		log.Println("Whois: ", odm.Whois)
+	} else {
+		log.Println(er)
+	}
 }
 
 func (r *revDns) updateDNSEntry(new revdb.DnsVal) {
 	var odm revdb.DnsInfo
+	doUpdate := false
 	for dm := range new.Domains {
 		val := new.Domains[dm]
 		info, err := r.db.ReadDB(dm, revdb.DnsBucket)
 		if err == nil && len(info) != 0 {
+
 			odm = revdb.DnsInfo{
 				Source:   make(map[string]struct{}),
 				Referers: make(map[string]struct{}),
 			}
-			log.Println(string(info))
+
+			//log.Println(string(info))
 			err := json.Unmarshal(info, &odm)
 			if err != nil {
 				log.Println("Error updating DNS entry")
@@ -94,25 +139,35 @@ func (r *revDns) updateDNSEntry(new revdb.DnsVal) {
 				break
 			}
 
-			if odm.Whois != val.Whois {
-				log.Println("Whois Information Change - ",
-					dm)
-				odm.Whois = val.Whois
-			}
-
+			/*
+				if odm.Whois != val.Whois {
+					log.Println("Whois Information Change - ",
+						dm)
+					odm.Whois = val.Whois
+				}
+			*/
 			for ref := range val.Referers {
 				if _, ok := odm.Referers[ref]; !ok {
+					doUpdate = true
 					odm.Referers[ref] = struct{}{}
 				}
 			}
 
 			for src := range val.Source {
 				if _, ok := odm.Source[src]; !ok {
+					doUpdate = true
 					odm.Source[src] = struct{}{}
 				}
 			}
-			r.db.WriteDB(dm, odm)
+			if doUpdate {
+				r.db.WriteDB(dm, odm)
+			}
 		} else {
+			val := val
+			val.WlId = r.wl.Lookup(dm)
+			if val.WlId == 0 {
+				r.updateWhoisInfo(dm, &val)
+			}
 			r.db.WriteDB(dm, val)
 		}
 	}
@@ -177,13 +232,8 @@ func (r *revDns) LookupDomain(domain string) (string, error) {
 		return "", err
 	}
 
-	js, err := json.Marshal(dnsInfo)
-	if err != nil {
-		log.Println(err)
-		return "", err
-	}
-	log.Println("Returning ", string(js), " for ", domain)
-	return string(js), nil
+	log.Println("Returning ", string(dnsInfo), " for ", domain)
+	return string(dnsInfo), nil
 }
 
 func (r *revDns) httpHandler() {
