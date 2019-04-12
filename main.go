@@ -18,12 +18,4 @@ func main() {
 
 	r := NewRevDns(conf)
 	r.Start()
-
-	s := &stream{
-		brokers: []string{conf.Kafka.Host},
-		topic:   conf.Kafka.Topic,
-		writer:  r.writer,
-	}
-	s.Init(conf)
-	s.Run()
 }

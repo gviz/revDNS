@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	wis "github.com/domainr/whois"
 	"github.com/gorilla/mux"
@@ -22,12 +23,32 @@ type writeReq struct {
 	c    chan struct{}
 }
 
+type Alert struct {
+	Name    string `json:"name"`
+	Type    string `json:"attack_type"`
+	Host    string `json:"host"`
+	Msg     string `json:"message"`
+	encoded []byte
+	err     error
+}
+
+func (a *Alert) Encode() ([]byte, error) {
+	a.encoded, a.err = json.Marshal(a)
+	return a.encoded, a.err
+}
+
+func (a *Alert) Length() int {
+	return len(a.encoded)
+}
+
 type revDns struct {
 	httpReq chan lkupReq
 	writer  chan writeReq
 	db      revdb.DBIface
 	conf    *revconfig.RevConfig
 	wl      *wl.WhitelistDB
+	alert   chan Alert
+	stream  *stream
 }
 
 func NewRevDns(conf *revconfig.RevConfig) *revDns {
@@ -35,11 +56,23 @@ func NewRevDns(conf *revconfig.RevConfig) *revDns {
 		Name: "Umbrella",
 	}
 	w.Init("Default")
+	writer := make(chan writeReq, 50000)
+	stream := &stream{
+		brokers:    []string{conf.Kafka.Host},
+		readTopic:  conf.Kafka.ReadTopic,
+		alertTopic: conf.Kafka.AlertChannel,
+		writer:     writer,
+	}
+
+	stream.Init(conf)
+
 	return &revDns{
 		httpReq: make(chan lkupReq, 50000),
 		writer:  make(chan writeReq, 50000),
 		conf:    conf,
 		wl:      &w,
+		alert:   make(chan Alert, 50000),
+		stream:  stream,
 	}
 }
 
@@ -167,11 +200,33 @@ func (r *revDns) updateDNSEntry(new revdb.DnsVal) {
 			val.WlId = r.wl.Lookup(dm)
 			if val.WlId == 0 {
 				r.updateWhoisInfo(dm, &val)
+				r.checkForNewDomain(dm,
+					val.Whois.Registrar.CreatedDate)
 			}
 			r.db.WriteDB(dm, val)
 		}
 	}
 
+}
+
+func (r *revDns) checkForNewDomain(host string, ctime string) {
+	//	tm, err := time.Parse()
+	//	timeFormat := "2002-03-29T21:33:52Z"
+	tm, err := time.Parse(time.RFC3339, ctime)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	if time.Since(tm).Hours() < 30*24 {
+		log.Println("New Domain: Less than 30 days.....")
+		r.alert <- Alert{
+			Name: "New Domain",
+			Host: host,
+			Type: "INFO",
+			Msg:  "Less than 30 days.....",
+		}
+	}
 }
 
 func (r *revDns) LookupIP(ip string, verbose int) (string, error) {
@@ -250,6 +305,8 @@ func (r *revDns) Start() {
 
 	log.Println("Starting http handler")
 	go r.httpHandler()
+
+	r.stream.Run()
 }
 
 //Handle DB lookups and updates
@@ -289,6 +346,8 @@ func (r *revDns) dbHandler() {
 				r.updateDNSEntry(wr.info)
 				wr.c <- struct{}{}
 			}(wr)
+		case alert := <-r.alert:
+			r.stream.WriteAlert(alert)
 		}
 	}
 }

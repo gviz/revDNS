@@ -10,14 +10,23 @@ import (
 
 //Input Stream Handling .
 type stream struct {
-	brokers   []string
-	topic     string
-	consumer  sarama.Consumer
-	pConsumer sarama.PartitionConsumer
-	writer    chan writeReq
-	conf      *revconfig.RevConfig
+	brokers    []string
+	readTopic  string
+	alertTopic string
+	consumer   sarama.Consumer
+	pConsumer  sarama.PartitionConsumer
+	producer   sarama.AsyncProducer
+	writer     chan writeReq
+	conf       *revconfig.RevConfig
 }
 
+func (s *stream) WriteAlert(alert Alert) {
+	s.producer.Input() <- &sarama.ProducerMessage{
+		Key:   sarama.StringEncoder(alert.Type),
+		Value: &alert,
+		Topic: s.alertTopic,
+	}
+}
 func (s *stream) getNewWriteReq(kv map[string]string) writeReq {
 	var info revdb.DnsInfo
 
@@ -57,13 +66,20 @@ func (s *stream) Init(conf *revconfig.RevConfig) {
 	}
 
 	s.consumer = consumer
-	pConsumer, err := consumer.ConsumePartition(s.topic, 0, sarama.OffsetNewest)
+	pConsumer, err := consumer.ConsumePartition(s.readTopic, 0, sarama.OffsetNewest)
 	if err != nil {
 		log.Fatalln(err)
 	}
 
 	s.pConsumer = pConsumer
 	s.conf = conf
+
+	producer, err := sarama.NewAsyncProducer(s.brokers, nil)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	s.producer = producer
 }
 
 //DNS responses

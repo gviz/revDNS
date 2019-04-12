@@ -8,12 +8,6 @@ import (
 	whoisparser "github.com/likexian/whois-parser-go"
 )
 
-type Alert struct {
-	name  string
-	atype string
-	msg   string
-}
-
 type DnsInfo struct {
 	WlId     int                    `json:wlid`
 	Whois    *whoisparser.WhoisInfo `json:"whois,omitempty"`
