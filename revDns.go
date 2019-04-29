@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -23,21 +24,41 @@ type writeReq struct {
 	c    chan struct{}
 }
 
-type Alert struct {
+const (
+	EVENT_TYPE_BL = 1 + iota
+	EVENT_TYPE_NEW
+	EVENT_TYPE_DOM_AGE
+	EVENT_TYPE_ATTACKER
+)
+
+const (
+	EVENT_BL_DOM = 1 + iota
+	EVENT_BL_IP
+	EVENT_YOUNG_HOST
+	EVENT_ATTACKER
+	EVENT_NEW_HOST
+)
+
+type Event struct {
 	Name    string `json:"name"`
-	Type    string `json:"attack_type"`
+	Type    string `json:"event_type"`
 	Host    string `json:"host"`
 	Msg     string `json:"message"`
 	encoded []byte
 	err     error
 }
 
-func (a *Alert) Encode() ([]byte, error) {
+func (a *Event) Encode() ([]byte, error) {
 	a.encoded, a.err = json.Marshal(a)
+	if a.err != nil {
+		log.Println(a.err)
+	} else {
+		log.Println(string(a.encoded))
+	}
 	return a.encoded, a.err
 }
 
-func (a *Alert) Length() int {
+func (a *Event) Length() int {
 	return len(a.encoded)
 }
 
@@ -47,32 +68,35 @@ type revDns struct {
 	db      revdb.DBIface
 	conf    *revconfig.RevConfig
 	wl      *wl.WhitelistDB
-	alert   chan Alert
+	alert   chan Event
 	stream  *stream
+	ctx     context.Context
 }
 
-func NewRevDns(conf *revconfig.RevConfig) *revDns {
+func NewRevDns(conf *revconfig.RevConfig, ctx context.Context) *revDns {
 	w := wl.WhitelistDB{
 		Name: "Umbrella",
 	}
 	w.Init("Default")
+
 	writer := make(chan writeReq, 50000)
 	stream := &stream{
 		brokers:    []string{conf.Kafka.Host},
 		readTopic:  conf.Kafka.ReadTopic,
-		alertTopic: conf.Kafka.AlertChannel,
+		alertTopic: conf.Kafka.EventChannel,
 		writer:     writer,
+		ctx:        ctx,
 	}
 
 	stream.Init(conf)
-
 	return &revDns{
 		httpReq: make(chan lkupReq, 50000),
 		writer:  make(chan writeReq, 50000),
 		conf:    conf,
 		wl:      &w,
-		alert:   make(chan Alert, 50000),
+		alert:   make(chan Event, 50000),
 		stream:  stream,
+		ctx:     ctx,
 	}
 }
 
@@ -220,7 +244,7 @@ func (r *revDns) checkForNewDomain(host string, ctime string) {
 
 	if time.Since(tm).Hours() < 30*24 {
 		log.Println("New Domain: Less than 30 days.....")
-		r.alert <- Alert{
+		r.alert <- Event{
 			Name: "New Domain",
 			Host: host,
 			Type: "INFO",
@@ -300,12 +324,20 @@ func (r *revDns) httpHandler() {
 }
 
 func (r *revDns) Start() {
+	rCtx, cancel := context.WithCancel(r.ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-rCtx.Done():
+			log.Println("Cancelling revDns Ctx")
+		}
+	}()
+
 	log.Println("Starting DB handler ...")
 	go r.dbHandler()
 
 	log.Println("Starting http handler")
 	go r.httpHandler()
-
 	r.stream.Run()
 }
 

@@ -7,12 +7,12 @@ import (
 )
 
 type KafkaConfig struct {
-	Host         string `yaml: host`
+	Host         string
 	ReadTopic    string
 	AlertTopic   string
-	AlertChannel string
+	EventChannel string
 	SslStream    string
-	DnsStream    string
+	DNSStream    string
 	HttpStream   string
 	FlowStream   string
 }
@@ -57,9 +57,9 @@ func InitConfig() *RevConfig {
 		Kafka: KafkaConfig{
 			Host:         viper.GetString("input.host"),
 			ReadTopic:    viper.GetString("input.topic"),
-			AlertChannel: viper.GetString("output.alert-channel"),
+			EventChannel: viper.GetString("output.event-channel"),
 			SslStream:    viper.GetString("input.stream_ssl"),
-			DnsStream:    viper.GetString("input.stream_dns"),
+			DNSStream:    viper.GetString("input.stream_dns"),
 			HttpStream:   viper.GetString("input.stream_http"),
 			FlowStream:   viper.GetString("input.stream_flow"),
 		},

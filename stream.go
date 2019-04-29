@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"log"
+	"time"
 
 	"github.com/Shopify/sarama"
 	"github.com/gviz/revDNS/internal/revconfig"
@@ -18,9 +20,11 @@ type stream struct {
 	producer   sarama.AsyncProducer
 	writer     chan writeReq
 	conf       *revconfig.RevConfig
+	ctx        context.Context
 }
 
-func (s *stream) WriteAlert(alert Alert) {
+func (s *stream) WriteAlert(alert Event) {
+	log.Println("Writing to Topic:", s.alertTopic, " ", alert)
 	s.producer.Input() <- &sarama.ProducerMessage{
 		Key:   sarama.StringEncoder(alert.Type),
 		Value: &alert,
@@ -53,7 +57,12 @@ func (s *stream) getNewWriteReq(kv map[string]string) writeReq {
 		},
 	}
 }
-
+func (s *stream) Close() {
+	log.Println("Closing stream ...")
+	s.consumer.Close()
+	s.producer.Close()
+	log.Println("Streams closed...")
+}
 func (s *stream) Init(conf *revconfig.RevConfig) {
 	if len(s.brokers) == 0 {
 		log.Panic("No brokers specified for kafka..")
@@ -74,12 +83,24 @@ func (s *stream) Init(conf *revconfig.RevConfig) {
 	s.pConsumer = pConsumer
 	s.conf = conf
 
-	producer, err := sarama.NewAsyncProducer(s.brokers, nil)
+	config := sarama.NewConfig()
+	config.Producer.RequiredAcks = sarama.WaitForLocal       // Only wait for the leader to ack
+	config.Producer.Compression = sarama.CompressionSnappy   // Compress messages
+	config.Producer.Flush.Frequency = 500 * time.Millisecond // Flush batches every 500ms
+
+	producer, err := sarama.NewAsyncProducer(s.brokers, config)
 	if err != nil {
 		log.Fatalln(err)
 	}
 
 	s.producer = producer
+
+	go func() {
+		for err := range producer.Errors() {
+			log.Println("Failed to write access log entry:", err)
+		}
+	}()
+
 }
 
 //DNS responses
@@ -191,6 +212,9 @@ func (s *stream) processHTTP(js *revJson) {
 
 func (s *stream) Run() {
 	log.Println("Run...")
+	sCtx, cancel := context.WithCancel(s.ctx)
+	defer cancel()
+
 	for {
 		select {
 		case msg := <-s.pConsumer.Messages():
@@ -202,11 +226,12 @@ func (s *stream) Run() {
 				}
 				sType, err := js.getValStr("@stream")
 				if err != nil {
+					log.Println(err)
 					return
 				}
 				//				log.Println("stype:", sType)
 				switch sType {
-				case s.conf.Kafka.DnsStream:
+				case s.conf.Kafka.DNSStream:
 					//log.Println(string(val))
 					s.processDNS(js)
 				case s.conf.Kafka.SslStream:
@@ -222,6 +247,12 @@ func (s *stream) Run() {
 				}
 			}(msg.Value)
 
+		case <-sCtx.Done():
+			log.Println("Stream ctx cancelled")
+			s.Close()
+			return
 		}
+
 	}
+	log.Println("Exiting Stream Run ..")
 }
