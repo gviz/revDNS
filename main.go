@@ -45,6 +45,8 @@ func main() {
 		}
 	}(ctx, sig)
 
+	b := bl.BlacklistDB{}
+
 	r := NewRevDns(conf, ctx)
 	r.Start()
 }
