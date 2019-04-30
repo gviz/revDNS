@@ -1,4 +1,4 @@
-package wl
+package bl
 
 import (
 	"archive/zip"
@@ -12,8 +12,12 @@ import (
 )
 
 type blSource struct {
-	url     string
-	handler int
+	url      string
+	fileType string
+	domIndx  int
+	valIndx  int
+	skipChar byte
+	handler  int
 }
 
 //Add new sources here
@@ -62,7 +66,7 @@ func (bl *BlacklistDB) processRansomware(data []byte) {
 	b := bufio.NewScanner(s)
 	for b.Scan() {
 		l := b.Text()
-		if l[0] == '#' {
+		if (len(l) == 0) || (l[0] == '#') {
 			continue
 		}
 		log.Printf("Ransomware Entry: %s \n", l)
@@ -92,9 +96,9 @@ func (bl *BlacklistDB) List() {
 		fmt.Println(key)
 	}
 }
-func (bl *BlacklistDB) processSpywareList(data []byte, len int64) {
+func (bl *BlacklistDB) processSpywareList(data []byte, ln int64) {
 	var buff []byte
-	zp, err := zip.NewReader(bytes.NewReader(data), len)
+	zp, err := zip.NewReader(bytes.NewReader(data), ln)
 	if err != nil {
 		log.Println(err)
 		return
@@ -111,15 +115,17 @@ func (bl *BlacklistDB) processSpywareList(data []byte, len int64) {
 	b := bufio.NewScanner(s)
 	for b.Scan() {
 		l := b.Text()
-		if l[0] == '#' {
+		l = strings.TrimSpace(l)
+		if (len(l) == 0) || (l[0] == '/') {
 			continue
 		}
-		values := strings.Split(l, " ")
-		log.Printf("Spyware Entry: %s \n", values[0])
-		if _, ok := bl.db[values[0]]; ok {
-			bl.db[l].spyWare = true
+		values := strings.Fields(l)
+		dom := strings.Trim(values[1], "\"")
+		log.Printf("Spyware Entry: %s \n", dom)
+		if _, ok := bl.db[dom]; ok {
+			bl.db[dom].spyWare = true
 		} else {
-			bl.db[l] = &blEntry{
+			bl.db[dom] = &blEntry{
 				spyWare: true,
 			}
 		}
@@ -127,9 +133,9 @@ func (bl *BlacklistDB) processSpywareList(data []byte, len int64) {
 	}
 }
 
-func (bl *BlacklistDB) processMalwareList(data []byte, len int64) {
+func (bl *BlacklistDB) processMalwareList(data []byte, ln int64) {
 	var buff []byte
-	zp, err := zip.NewReader(bytes.NewReader(data), len)
+	zp, err := zip.NewReader(bytes.NewReader(data), ln)
 	if err != nil {
 		log.Println(err)
 		return
@@ -146,15 +152,18 @@ func (bl *BlacklistDB) processMalwareList(data []byte, len int64) {
 	b := bufio.NewScanner(s)
 	for b.Scan() {
 		l := b.Text()
-		if l[0] == '#' {
+		l = strings.TrimSpace(l)
+		log.Println(l)
+		if (len(l) == 0) || (l[0] == '#') {
 			continue
 		}
-		values := strings.Split(l, " ")
+
+		values := strings.Fields(l)
 		log.Printf("Malware Entry: %s - %s\n", values[0], values[1])
 		if _, ok := bl.db[values[0]]; ok {
-			bl.db[l].malwareType = values[1]
+			bl.db[values[0]].malwareType = values[1]
 		} else {
-			bl.db[l] = &blEntry{
+			bl.db[values[0]] = &blEntry{
 				malwareType: values[1],
 			}
 		}
