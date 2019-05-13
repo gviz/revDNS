@@ -9,7 +9,8 @@ import (
 )
 
 type DnsInfo struct {
-	WlId     int                    `json:wlid`
+	WlId     int `json:wlid`
+	Black    bool
 	Whois    *whoisparser.WhoisInfo `json:"whois,omitempty"`
 	Referers map[string]struct{}    `json:"referers,omitempty"` //Http Referers
 	Source   map[string]struct{}    `json:"source,omitempty"`   //Source stream. Http, dns, ssl,...

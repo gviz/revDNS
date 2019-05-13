@@ -12,6 +12,7 @@ import (
 
 	wis "github.com/domainr/whois"
 	"github.com/gorilla/mux"
+	"github.com/gviz/revDNS/internal/bl"
 	"github.com/gviz/revDNS/internal/revconfig"
 	"github.com/gviz/revDNS/internal/revdb"
 	"github.com/gviz/revDNS/internal/wl"
@@ -68,6 +69,7 @@ type revDns struct {
 	db      revdb.DBIface
 	conf    *revconfig.RevConfig
 	wl      *wl.WhitelistDB
+	bl      *bl.BlacklistDB
 	alert   chan Event
 	stream  *stream
 	ctx     context.Context
@@ -78,6 +80,9 @@ func NewRevDns(conf *revconfig.RevConfig, ctx context.Context) *revDns {
 		Name: "Umbrella",
 	}
 	w.Init("Default")
+
+	b := bl.BlacklistDB{}
+	b.Init()
 
 	writer := make(chan writeReq, 50000)
 	stream := &stream{
@@ -97,6 +102,7 @@ func NewRevDns(conf *revconfig.RevConfig, ctx context.Context) *revDns {
 		alert:   make(chan Event, 50000),
 		stream:  stream,
 		ctx:     ctx,
+		bl:      &b,
 	}
 }
 
@@ -104,6 +110,7 @@ func (r *revDns) updateIPEntry(ip string, new revdb.DnsVal) {
 	var old revdb.IPDBEntry
 	doUpdate := false
 	/*TBD: check for existing entry and update */
+	bl := r.bl.Lookup(ip)
 	ipVal, err := r.db.ReadDB(ip, revdb.IpBucket)
 	if err == nil && len(ipVal) != 0 {
 		err := json.Unmarshal(ipVal, &old)
@@ -113,12 +120,22 @@ func (r *revDns) updateIPEntry(ip string, new revdb.DnsVal) {
 		}
 		//log.Println("Updating new entry for ", ip, new)
 	} else {
-		//log.Println("Adding new entry for ", ip, new)
 		old = revdb.IPDBEntry{
 			Ip: revdb.IpInfo{
 				Protos: make(map[revdb.Proto]struct{}),
 			},
 			Domains: make(map[string]struct{}),
+		}
+	}
+
+	//log.Println("Adding new entry for ", ip, new)
+	if bl != nil {
+		old.Ip.Black = true
+		r.alert <- Event{
+			Name: "BL IP",
+			Host: ip,
+			Type: "INFO",
+			Msg:  "Blacklisted IP",
 		}
 	}
 
@@ -145,6 +162,7 @@ func (r *revDns) updateIPEntry(ip string, new revdb.DnsVal) {
 			old.Domains[dm] = struct{}{}
 		}
 	}
+
 	if doUpdate {
 		r.db.WriteDB(ip, old)
 	}
@@ -216,6 +234,16 @@ func (r *revDns) updateDNSEntry(new revdb.DnsVal) {
 					odm.Source[src] = struct{}{}
 				}
 			}
+			bl := r.bl.Lookup(dm)
+			if bl != nil {
+				odm.Black = true
+				r.alert <- Event{
+					Name: "BL Domain",
+					Host: dm,
+					Type: "INFO",
+					Msg:  "Blacklisted domain",
+				}
+			}
 			if doUpdate {
 				r.db.WriteDB(dm, odm)
 			}
@@ -226,6 +254,16 @@ func (r *revDns) updateDNSEntry(new revdb.DnsVal) {
 				r.updateWhoisInfo(dm, &val)
 				r.checkForNewDomain(dm,
 					val.Whois.Registrar.CreatedDate)
+			}
+			bl := r.bl.Lookup(dm)
+			if bl != nil {
+				odm.Black = true
+				r.alert <- Event{
+					Name: "BL Domain",
+					Host: dm,
+					Type: "INFO",
+					Msg:  "Blacklisted domain",
+				}
 			}
 			r.db.WriteDB(dm, val)
 		}

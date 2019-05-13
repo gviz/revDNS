@@ -11,7 +11,6 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/gviz/revDNS/internal/bl"
 	"github.com/gviz/revDNS/internal/revconfig"
 )
 
@@ -45,9 +44,6 @@ func main() {
 			}
 		}
 	}(ctx, sig)
-
-	b := bl.BlacklistDB{}
-	b.Init()
 
 	r := NewRevDns(conf, ctx)
 	r.Start()
